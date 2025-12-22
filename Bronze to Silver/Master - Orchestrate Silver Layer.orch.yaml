@@ -1,0 +1,274 @@
+type: "orchestration"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Master orchestration for Bronze to Silver layer - Runs all 6 incremental\
+      \ transformation pipelines in parallel"
+  components:
+    Start:
+      type: "start"
+      transitions:
+        unconditional:
+        - "Run Campaigns"
+        - "Run Channels"
+        - "Run Performance"
+        - "Run Products"
+        - "Run Sales"
+        - "Run Customers"
+      parameters:
+        componentName: "Start"
+    Run Campaigns:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "All Complete"
+      parameters:
+        componentName: "Run Campaigns"
+        transformationPipelineLink:
+          pipelineName: "Bronze to Silver - Campaigns"
+        transformationJob: "Bronze to Silver/Bronze to Silver - Campaigns.tran.yaml"
+        setScalarVariables:
+        - - "bronze_database"
+          - "${bronze_database}"
+        - - "bronze_schema"
+          - "${bronze_schema}"
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+    Run Customers:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "All Complete"
+      parameters:
+        componentName: "Run Customers"
+        transformationPipelineLink:
+          pipelineName: "Bronze to Silver - Customers"
+        transformationJob: "Bronze to Silver/Bronze to Silver - Customers.tran.yaml"
+        setScalarVariables:
+        - - "bronze_database"
+          - "${bronze_database}"
+        - - "bronze_schema"
+          - "${bronze_schema}"
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+    Run Channels:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "All Complete"
+      parameters:
+        componentName: "Run Channels"
+        transformationPipelineLink:
+          pipelineName: "Bronze to Silver - Channels"
+        transformationJob: "Bronze to Silver/Bronze to Silver - Channels.tran.yaml"
+        setScalarVariables:
+        - - "bronze_database"
+          - "${bronze_database}"
+        - - "bronze_schema"
+          - "${bronze_schema}"
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+    Run Performance:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "All Complete"
+      parameters:
+        componentName: "Run Performance"
+        transformationPipelineLink:
+          pipelineName: "Bronze to Silver - Performance"
+        transformationJob: "Bronze to Silver/Bronze to Silver - Performance.tran.yaml"
+        setScalarVariables:
+        - - "bronze_database"
+          - "${bronze_database}"
+        - - "bronze_schema"
+          - "${bronze_schema}"
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+    Run Products:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "All Complete"
+      parameters:
+        componentName: "Run Products"
+        transformationPipelineLink:
+          pipelineName: "Bronze to Silver - Products"
+        transformationJob: "Bronze to Silver/Bronze to Silver - Products.tran.yaml"
+        setScalarVariables:
+        - - "bronze_database"
+          - "${bronze_database}"
+        - - "bronze_schema"
+          - "${bronze_schema}"
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+    Run Sales:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "All Complete"
+      parameters:
+        componentName: "Run Sales"
+        transformationPipelineLink:
+          pipelineName: "Bronze to Silver - Sales"
+        transformationJob: "Bronze to Silver/Bronze to Silver - Sales.tran.yaml"
+        setScalarVariables:
+        - - "bronze_database"
+          - "${bronze_database}"
+        - - "bronze_schema"
+          - "${bronze_schema}"
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+        - - "SILVER_LOAD"
+          - "COMPLETE"
+    All Complete:
+      type: "and"
+      parameters:
+        componentName: "All Complete"
+  variables:
+    bronze_database:
+      metadata:
+        type: "TEXT"
+        description: "Bronze layer database name - same for all environments"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    bronze_schema:
+      metadata:
+        type: "TEXT"
+        description: "Bronze layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "BRONZE"
+    silver_database:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer database name - same for all environments"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    silver_schema:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "SILVER"
+    warehouse_name:
+      metadata:
+        type: "TEXT"
+        description: "Snowflake warehouse for processing"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_WH"
+    watermark_default:
+      metadata:
+        type: "TEXT"
+        description: "Default watermark date for first load in child pipelines - change\
+          \ to force reload from specific date"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "1900-01-01"
+design:
+  components:
+    Run Channels:
+      position:
+        x: 200
+        "y": 50
+      tempMetlId: 4
+    Start:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: 1
+    Run Products:
+      position:
+        x: 200
+        "y": 250
+      tempMetlId: 6
+    All Complete:
+      position:
+        x: 400
+        "y": 100
+      tempMetlId: 8
+    Run Performance:
+      position:
+        x: 200
+        "y": 150
+      tempMetlId: 5
+    Run Campaigns:
+      position:
+        x: 200
+        "y": -150
+      tempMetlId: 2
+    Run Sales:
+      position:
+        x: 200
+        "y": 350
+      tempMetlId: 7
+    Run Customers:
+      position:
+        x: 200
+        "y": -50
+      tempMetlId: 3
+  notes:
+    "1":
+      position:
+        x: 0
+        "y": -577
+      size:
+        height: 405
+        width: 650
+      theme: "white"
+      content: |
+        ### Master Silver Layer Orchestration
+
+        **Parallel Execution**: All 6 pipelines run simultaneously
+
+        - **Campaigns**: 1K rows, ~1 sec
+        - **Customers**: 10K rows, ~2 sec
+        - **Channels**: 20 rows, <1 sec
+        - **Performance**: 50K rows, ~5 sec (CTR/ROAS)
+        - **Products**: 1K rows, ~1 sec
+        - **Sales**: 100K rows, ~10 sec (LARGEST)
+
+        **Total**: ~10-15 sec (parallel) vs 25-30 sec (sequential)
+        **AND**: Waits for ALL to complete
+
+        ---
+
+        **Centralized Variables** (Single source of truth):
+        - bronze_database = MATILLION_DB
+        - bronze_schema = BRONZE
+        - silver_database = MATILLION_DB
+        - silver_schema = SILVER
+        - warehouse_name = MATILLION_WH
+        - watermark_default = 1900-01-01
+
+        **Variable Passing**: Master passes all 6 variables to each child transformation pipeline via `setScalarVariables`. Update here to change all 6 pipelines at once!
+
+        See `PROJECT-VARIABLES.md` for full documentation.

@@ -1,0 +1,271 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "DIM_CAMPAIGN - SCD Type 2 using Detect Changes component"
+  components:
+    Load Silver Campaigns:
+      type: "table-input"
+      parameters:
+        componentName: "Load Silver Campaigns"
+        database: "[Environment Default]"
+        schema: "SILVER"
+        targetTable: "MTLN_SILVER_CAMPAIGNS"
+        columnNames:
+          - "CAMPAIGN_ID"
+          - "CAMPAIGN_NAME"
+          - "CAMPAIGN_TYPE"
+          - "STATUS"
+          - "OBJECTIVE"
+          - "START_DATE"
+          - "END_DATE"
+          - "BUDGET"
+          - "DURATION_DAYS"
+          - "SOURCE_SYSTEM"
+    Load Gold Campaigns:
+      type: "table-input"
+      parameters:
+        componentName: "Load Gold Campaigns"
+        database: "[Environment Default]"
+        schema: "${gold_schema}"
+        targetTable: "DIM_CAMPAIGN"
+        columnNames:
+          - "CAMPAIGN_KEY"
+          - "CAMPAIGN_ID"
+          - "CAMPAIGN_NAME"
+          - "CAMPAIGN_TYPE"
+          - "STATUS"
+          - "OBJECTIVE"
+          - "START_DATE"
+          - "END_DATE"
+          - "BUDGET"
+          - "DURATION_DAYS"
+          - "VALID_FROM"
+          - "VALID_TO"
+          - "IS_CURRENT"
+          - "VERSION_NUMBER"
+          - "CREATED_TIMESTAMP"
+          - "UPDATED_TIMESTAMP"
+          - "SOURCE_SYSTEM"
+    Filter Current Rows:
+      type: "filter"
+      sources:
+        - "Load Gold Campaigns"
+      parameters:
+        componentName: "Filter Current Rows"
+        filterConditions:
+          - - "IS_CURRENT"
+            - "Is"
+            - "Equal to"
+            - "TRUE"
+        combineCondition: "And"
+    Detect Changes:
+      type: "detect-changes"
+      sources:
+        - "Load Silver Campaigns"
+        - "Filter Current Rows"
+      parameters:
+        componentName: "Detect Changes"
+        masterTable: "Load Silver Campaigns"
+        matchKeys:
+          - "CAMPAIGN_ID"
+        compareColumns:
+          - "CAMPAIGN_NAME"
+          - "CAMPAIGN_TYPE"
+          - "STATUS"
+          - "OBJECTIVE"
+          - "START_DATE"
+          - "END_DATE"
+          - "BUDGET"
+          - "DURATION_DAYS"
+        indicatorColumn: "CHANGE_TYPE"
+        outputColumnMapping:
+          - - "master_CAMPAIGN_NAME"
+            - "CAMPAIGN_NAME"
+          - - "master_CAMPAIGN_TYPE"
+            - "CAMPAIGN_TYPE"
+          - - "master_STATUS"
+            - "STATUS"
+          - - "master_OBJECTIVE"
+            - "OBJECTIVE"
+          - - "master_START_DATE"
+            - "START_DATE"
+          - - "master_END_DATE"
+            - "END_DATE"
+          - - "master_BUDGET"
+            - "BUDGET"
+          - - "master_DURATION_DAYS"
+            - "DURATION_DAYS"
+          - - "master_SOURCE_SYSTEM"
+            - "SOURCE_SYSTEM"
+          - - "compare_VERSION_NUMBER"
+            - "PREV_VERSION_NUMBER"
+          - - "compare_CREATED_TIMESTAMP"
+            - "ORIGINAL_CREATED_TIMESTAMP"
+    Filter New and Changed:
+      type: "filter"
+      sources:
+        - "Detect Changes"
+      parameters:
+        componentName: "Filter New and Changed"
+        filterConditions:
+          - - "CHANGE_TYPE"
+            - "Is"
+            - "Equal to"
+            - "N"
+          - - "CHANGE_TYPE"
+            - "Is"
+            - "Equal to"
+            - "C"
+        combineCondition: "Or"
+    Add SCD Metadata:
+      type: "calculator"
+      sources:
+        - "Filter New and Changed"
+      parameters:
+        componentName: "Add SCD Metadata"
+        includeInputColumns: "Yes"
+        calculations:
+          - - "CURRENT_TIMESTAMP()"
+            - "VALID_FROM"
+          - - "'9999-12-31 23:59:59'::TIMESTAMP_NTZ"
+            - "VALID_TO"
+          - - "TRUE"
+            - "IS_CURRENT"
+          - - "COALESCE(\"PREV_VERSION_NUMBER\", 0) + 1"
+            - "VERSION_NUMBER"
+          - - "COALESCE(\"ORIGINAL_CREATED_TIMESTAMP\", CURRENT_TIMESTAMP())"
+            - "CREATED_TIMESTAMP"
+          - - "CURRENT_TIMESTAMP()"
+            - "UPDATED_TIMESTAMP"
+    Select Final Columns:
+      type: "sql"
+      sources:
+        - "Add SCD Metadata"
+      parameters:
+        componentName: "Select Final Columns"
+        query: |
+          SELECT 
+            "CAMPAIGN_ID",
+            "CAMPAIGN_NAME",
+            "CAMPAIGN_TYPE",
+            "STATUS",
+            "OBJECTIVE",
+            "START_DATE",
+            "END_DATE",
+            "BUDGET",
+            "DURATION_DAYS",
+            "VALID_FROM",
+            "VALID_TO",
+            "IS_CURRENT",
+            "VERSION_NUMBER",
+            "CREATED_TIMESTAMP",
+            "UPDATED_TIMESTAMP",
+            "SOURCE_SYSTEM"
+          FROM $T{Add SCD Metadata}
+    Append New Versions:
+      type: "table-output"
+      sources:
+        - "Select Final Columns"
+      parameters:
+        componentName: "Append New Versions"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "${gold_schema}"
+        targetTable: "DIM_CAMPAIGN"
+        fixDataTypeMismatches: "No"
+        columnMapping:
+          - - "CAMPAIGN_ID"
+            - "CAMPAIGN_ID"
+          - - "CAMPAIGN_NAME"
+            - "CAMPAIGN_NAME"
+          - - "CAMPAIGN_TYPE"
+            - "CAMPAIGN_TYPE"
+          - - "STATUS"
+            - "STATUS"
+          - - "OBJECTIVE"
+            - "OBJECTIVE"
+          - - "START_DATE"
+            - "START_DATE"
+          - - "END_DATE"
+            - "END_DATE"
+          - - "BUDGET"
+            - "BUDGET"
+          - - "DURATION_DAYS"
+            - "DURATION_DAYS"
+          - - "VALID_FROM"
+            - "VALID_FROM"
+          - - "VALID_TO"
+            - "VALID_TO"
+          - - "IS_CURRENT"
+            - "IS_CURRENT"
+          - - "VERSION_NUMBER"
+            - "VERSION_NUMBER"
+          - - "CREATED_TIMESTAMP"
+            - "CREATED_TIMESTAMP"
+          - - "UPDATED_TIMESTAMP"
+            - "UPDATED_TIMESTAMP"
+          - - "SOURCE_SYSTEM"
+            - "SOURCE_SYSTEM"
+        outputMode: "Append"
+  variables:
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+design:
+  components:
+    Load Silver Campaigns:
+      position:
+        x: 0
+        y: 0
+    Load Gold Campaigns:
+      position:
+        x: 0
+        y: 80
+    Filter Current Rows:
+      position:
+        x: 160
+        y: 80
+    Detect Changes:
+      position:
+        x: 320
+        y: 40
+    Filter New and Changed:
+      position:
+        x: 480
+        y: 40
+    Add SCD Metadata:
+      position:
+        x: 640
+        y: 40
+    Select Final Columns:
+      position:
+        x: 800
+        y: 40
+    Append New Versions:
+      position:
+        x: 960
+        y: 40
+  notes:
+    "1":
+      position:
+        x: -10
+        y: -400
+      size:
+        height: 380
+        width: 1050
+      theme: "yellow"
+      content: |
+        ### DIM_CAMPAIGN - SCD Type 2 (Component-Based)
+        
+        **LOAD STRATEGY**: SCD Type 2 using Detect Changes component
+        **RUN**: Daily (after initial load)
+        
+        **Component Flow**:
+        Load Silver → Load Gold → Filter Current → Detect Changes → Filter N+C → Add SCD Metadata → Select Columns → Append
+        
+        **Tracks Changes To**: CAMPAIGN_NAME, STATUS, BUDGET, START_DATE, END_DATE, OBJECTIVE, DURATION_DAYS

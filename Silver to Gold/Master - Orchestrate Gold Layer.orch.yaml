@@ -1,0 +1,221 @@
+type: "orchestration"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Master Gold Layer - Orchestrates all dimension and fact table loads"
+  components:
+    Start:
+      type: "start"
+      transitions:
+        unconditional:
+        - "Load DIM_DATE"
+        - "Load DIM_PRODUCT"
+        - "Load DIM_CUSTOMER"
+        - "Load DIM_CAMPAIGN"
+        - "Load DIM_CHANNEL"
+      parameters:
+        componentName: "Start"
+    Load DIM_DATE:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "Wait for All Dimensions"
+      parameters:
+        componentName: "Load DIM_DATE"
+        transformationJob: "Silver to Gold/Silver to Gold - DIM_DATE.tran.yaml"
+        setScalarVariables:
+        - - "gold_schema"
+          - "${gold_schema}"
+    Load DIM_PRODUCT:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "Wait for All Dimensions"
+      parameters:
+        componentName: "Load DIM_PRODUCT"
+        transformationJob: "Silver to Gold/Silver to Gold - DIM_PRODUCT.tran.yaml"
+        setScalarVariables:
+        - - "gold_schema"
+          - "${gold_schema}"
+    Load DIM_CUSTOMER:
+      type: "run-orchestration"
+      transitions:
+        success:
+        - "Wait for All Dimensions"
+      parameters:
+        componentName: "Load DIM_CUSTOMER"
+        orchestrationJob: "Silver to Gold/Silver to Gold - DIM_CUSTOMER (Complete SCD Type 2).orch.yaml"
+        setScalarVariables:
+        - - "gold_database"
+          - "${gold_database}"
+        - - "gold_schema"
+          - "${gold_schema}"
+    Load DIM_CAMPAIGN:
+      type: "run-orchestration"
+      transitions:
+        success:
+        - "Wait for All Dimensions"
+      parameters:
+        componentName: "Load DIM_CAMPAIGN"
+        orchestrationJob: "Silver to Gold/Silver to Gold - DIM_CAMPAIGN (Complete SCD Type 2).orch.yaml"
+        setScalarVariables:
+        - - "gold_database"
+          - "${gold_database}"
+        - - "gold_schema"
+          - "${gold_schema}"
+    Load DIM_CHANNEL:
+      type: "run-transformation"
+      transitions:
+        success:
+        - "Wait for All Dimensions"
+      parameters:
+        componentName: "Load DIM_CHANNEL"
+        transformationJob: "Silver to Gold/Silver to Gold - DIM_CHANNEL.tran.yaml"
+        setScalarVariables:
+        - - "gold_schema"
+          - "${gold_schema}"
+    Wait for All Dimensions:
+      type: "and"
+      transitions:
+        unconditional:
+        - "Load FACT_PERFORMANCE"
+        - "Load FACT_SALES"
+        - "Load FACT_CAMPAIGN_DAILY"
+      parameters:
+        componentName: "Wait for All Dimensions"
+    Load FACT_PERFORMANCE:
+      type: "run-transformation"
+      parameters:
+        componentName: "Load FACT_PERFORMANCE"
+        transformationJob: "Silver to Gold/Silver to Gold - FACT_PERFORMANCE.tran.yaml"
+        setScalarVariables:
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "gold_database"
+          - "${gold_database}"
+        - - "gold_schema"
+          - "${gold_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+    Load FACT_SALES:
+      type: "run-transformation"
+      parameters:
+        componentName: "Load FACT_SALES"
+        transformationJob: "Silver to Gold/Silver to Gold - FACT_SALES.tran.yaml"
+        setScalarVariables:
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "gold_database"
+          - "${gold_database}"
+        - - "gold_schema"
+          - "${gold_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+    Load FACT_CAMPAIGN_DAILY:
+      type: "run-transformation"
+      parameters:
+        componentName: "Load FACT_CAMPAIGN_DAILY"
+        transformationJob: "Silver to Gold/Silver to Gold - FACT_CAMPAIGN_DAILY.tran.yaml"
+        setScalarVariables:
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "gold_database"
+          - "${gold_database}"
+        - - "gold_schema"
+          - "${gold_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+  variables:
+    silver_database:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer database"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    silver_schema:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer schema"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "SILVER"
+    gold_database:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer database"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+    watermark_default:
+      metadata:
+        type: "TEXT"
+        description: "Default watermark for first fact load"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "1900-01-01"
+design:
+  components:
+    Load DIM_CUSTOMER:
+      position:
+        x: 160
+        "y": -20
+      tempMetlId: 4
+    Load DIM_PRODUCT:
+      position:
+        x: 160
+        "y": -110
+      tempMetlId: 3
+    Load DIM_CAMPAIGN:
+      position:
+        x: 160
+        "y": 60
+      tempMetlId: 5
+    Start:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: 1
+    Load DIM_DATE:
+      position:
+        x: 160
+        "y": -200
+      tempMetlId: 2
+    Load FACT_PERFORMANCE:
+      position:
+        x: 480
+        "y": -110
+      tempMetlId: 8
+    Load DIM_CHANNEL:
+      position:
+        x: 160
+        "y": 190
+      tempMetlId: 6
+    Load FACT_SALES:
+      position:
+        x: 490
+        "y": 30
+      tempMetlId: 9
+    Load FACT_CAMPAIGN_DAILY:
+      position:
+        x: 480
+        "y": 160
+      tempMetlId: 10
+    Wait for All Dimensions:
+      position:
+        x: 320
+        "y": 0
+      tempMetlId: 7

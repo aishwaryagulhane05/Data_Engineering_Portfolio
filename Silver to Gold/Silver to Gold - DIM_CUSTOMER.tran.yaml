@@ -1,0 +1,288 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "DIM_CUSTOMER - SCD Type 2 using Detect Changes component"
+  components:
+    Load Silver Customers:
+      type: "table-input"
+      parameters:
+        componentName: "Load Silver Customers"
+        database: "[Environment Default]"
+        schema: "SILVER"
+        targetTable: "MTLN_SILVER_CUSTOMERS"
+        columnNames:
+        - "CUSTOMER_ID"
+        - "CUSTOMER_NAME"
+        - "EMAIL"
+        - "PHONE"
+        - "SEGMENT"
+        - "TIER"
+        - "STATUS"
+        - "LIFETIME_VALUE"
+        - "EMAIL_VALID"
+        - "PHONE_VALID"
+        - "SOURCE_SYSTEM"
+    Load Gold Customers:
+      type: "table-input"
+      parameters:
+        componentName: "Load Gold Customers"
+        database: "[Environment Default]"
+        schema: "${gold_schema}"
+        targetTable: "DIM_CUSTOMER"
+        columnNames:
+        - "CUSTOMER_KEY"
+        - "CUSTOMER_ID"
+        - "CUSTOMER_NAME"
+        - "EMAIL"
+        - "PHONE"
+        - "SEGMENT"
+        - "TIER"
+        - "STATUS"
+        - "LIFETIME_VALUE"
+        - "EMAIL_VALID"
+        - "PHONE_VALID"
+        - "VALID_FROM"
+        - "VALID_TO"
+        - "IS_CURRENT"
+        - "VERSION_NUMBER"
+        - "CREATED_TIMESTAMP"
+        - "UPDATED_TIMESTAMP"
+        - "SOURCE_SYSTEM"
+    Filter Current Rows:
+      type: "filter"
+      sources:
+      - "Load Gold Customers"
+      parameters:
+        componentName: "Filter Current Rows"
+        filterConditions:
+        - - "IS_CURRENT"
+          - "Is"
+          - "Equal to"
+          - "TRUE"
+        combineCondition: "And"
+    Detect Changes:
+      type: "detect-changes"
+      sources:
+      - "Load Silver Customers"
+      - "Filter Current Rows"
+      parameters:
+        componentName: "Detect Changes"
+        masterTable: "Load Silver Customers"
+        matchKeys:
+        - "CUSTOMER_ID"
+        compareColumns:
+        - "CUSTOMER_NAME"
+        - "EMAIL"
+        - "PHONE"
+        - "SEGMENT"
+        - "TIER"
+        - "STATUS"
+        - "LIFETIME_VALUE"
+        - "EMAIL_VALID"
+        - "PHONE_VALID"
+        indicatorColumn: "CHANGE_TYPE"
+        outputColumnMapping:
+        - - "master_CUSTOMER_NAME"
+          - "CUSTOMER_NAME"
+        - - "master_EMAIL"
+          - "EMAIL"
+        - - "master_PHONE"
+          - "PHONE"
+        - - "master_SEGMENT"
+          - "SEGMENT"
+        - - "master_TIER"
+          - "TIER"
+        - - "master_STATUS"
+          - "STATUS"
+        - - "master_LIFETIME_VALUE"
+          - "LIFETIME_VALUE"
+        - - "master_EMAIL_VALID"
+          - "EMAIL_VALID"
+        - - "master_PHONE_VALID"
+          - "PHONE_VALID"
+        - - "master_SOURCE_SYSTEM"
+          - "SOURCE_SYSTEM"
+        - - "compare_VERSION_NUMBER"
+          - "PREV_VERSION_NUMBER"
+        - - "compare_CREATED_TIMESTAMP"
+          - "ORIGINAL_CREATED_TIMESTAMP"
+    Filter New and Changed:
+      type: "filter"
+      sources:
+      - "Detect Changes"
+      parameters:
+        componentName: "Filter New and Changed"
+        filterConditions:
+        - - "CHANGE_TYPE"
+          - "Is"
+          - "Equal to"
+          - "N"
+        - - "CHANGE_TYPE"
+          - "Is"
+          - "Equal to"
+          - "C"
+        combineCondition: "Or"
+    Add SCD Metadata:
+      type: "calculator"
+      sources:
+      - "Filter New and Changed"
+      parameters:
+        componentName: "Add SCD Metadata"
+        includeInputColumns: "Yes"
+        calculations:
+        - - "CURRENT_TIMESTAMP()"
+          - "VALID_FROM"
+        - - "'9999-12-31 23:59:59'::TIMESTAMP_NTZ"
+          - "VALID_TO"
+        - - "TRUE"
+          - "IS_CURRENT"
+        - - "COALESCE(\"PREV_VERSION_NUMBER\", 0) + 1"
+          - "VERSION_NUMBER"
+        - - "COALESCE(\"ORIGINAL_CREATED_TIMESTAMP\", CURRENT_TIMESTAMP())"
+          - "CREATED_TIMESTAMP"
+        - - "CURRENT_TIMESTAMP()"
+          - "UPDATED_TIMESTAMP"
+    Select Final Columns:
+      type: "sql"
+      sources:
+      - "Add SCD Metadata"
+      parameters:
+        componentName: "Select Final Columns"
+        query: "SELECT \n  \"CUSTOMER_ID\",\n  \"CUSTOMER_NAME\",\n  \"EMAIL\",\n\
+          \  \"PHONE\",\n  \"SEGMENT\",\n  \"TIER\",\n  \"STATUS\",\n  \"LIFETIME_VALUE\"\
+          ,\n  \"EMAIL_VALID\",\n  \"PHONE_VALID\",\n  \"VALID_FROM\",\n  \"VALID_TO\"\
+          ,\n  \"IS_CURRENT\",\n  \"VERSION_NUMBER\",\n  \"CREATED_TIMESTAMP\",\n\
+          \  \"UPDATED_TIMESTAMP\",\n  \"SOURCE_SYSTEM\"\nFROM $T{Add SCD Metadata}\n"
+    Append New Versions:
+      type: "table-output"
+      sources:
+      - "Select Final Columns"
+      parameters:
+        componentName: "Append New Versions"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "${gold_schema}"
+        targetTable: "DIM_CUSTOMER"
+        fixDataTypeMismatches: "No"
+        columnMapping:
+        - - "CUSTOMER_ID"
+          - "CUSTOMER_ID"
+        - - "CUSTOMER_NAME"
+          - "CUSTOMER_NAME"
+        - - "EMAIL"
+          - "EMAIL"
+        - - "PHONE"
+          - "PHONE"
+        - - "SEGMENT"
+          - "SEGMENT"
+        - - "TIER"
+          - "TIER"
+        - - "STATUS"
+          - "STATUS"
+        - - "LIFETIME_VALUE"
+          - "LIFETIME_VALUE"
+        - - "EMAIL_VALID"
+          - "EMAIL_VALID"
+        - - "PHONE_VALID"
+          - "PHONE_VALID"
+        - - "VALID_FROM"
+          - "VALID_FROM"
+        - - "VALID_TO"
+          - "VALID_TO"
+        - - "IS_CURRENT"
+          - "IS_CURRENT"
+        - - "VERSION_NUMBER"
+          - "VERSION_NUMBER"
+        - - "CREATED_TIMESTAMP"
+          - "CREATED_TIMESTAMP"
+        - - "UPDATED_TIMESTAMP"
+          - "UPDATED_TIMESTAMP"
+        - - "SOURCE_SYSTEM"
+          - "SOURCE_SYSTEM"
+        outputMode: "Append"
+  variables:
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+design:
+  components:
+    Detect Changes:
+      position:
+        x: 320
+        "y": 40
+      tempMetlId: 4
+    Append New Versions:
+      position:
+        x: 960
+        "y": 40
+      tempMetlId: 8
+    Load Silver Customers:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: 1
+    Add SCD Metadata:
+      position:
+        x: 640
+        "y": 40
+      tempMetlId: 6
+    Filter New and Changed:
+      position:
+        x: 480
+        "y": 40
+      tempMetlId: 5
+    Load Gold Customers:
+      position:
+        x: 0
+        "y": 80
+      tempMetlId: 2
+    Filter Current Rows:
+      position:
+        x: 160
+        "y": 80
+      tempMetlId: 3
+    Select Final Columns:
+      position:
+        x: 800
+        "y": 40
+      tempMetlId: 7
+  notes:
+    "1":
+      position:
+        x: -10
+        "y": -480
+      size:
+        height: 500
+        width: 1050
+      theme: "light-green"
+      content: "### DIM_CUSTOMER - SCD Type 2 (Component-Based)\n\n**LOAD STRATEGY**:\
+        \ SCD Type 2 using Detect Changes component\n**PREREQUISITES**: Run \"DIM_CUSTOMER\
+        \ (Initial Load)\" pipeline FIRST to populate Gold table\n**RUN**: Daily (after\
+        \ initial load)\n\n**Component Flow** (8 steps):\n1. **Load Silver** - Source\
+        \ data (new/changed customers)\n2. **Load Gold** - Existing dimension records\n\
+        3. **Filter Current** - Only IS_CURRENT = TRUE rows\n4. **Detect Changes**\
+        \ - Compares Silver (master) vs Gold (compare)\n   - **N** (New) - Customer\
+        \ exists in Silver, not in Gold\n   - **C** (Changed) - Customer exists in\
+        \ both, attributes changed\n   - **I** (Identical) - No changes detected\n\
+        \   - **D** (Deleted) - Customer exists in Gold, not in Silver\n5. **Filter\
+        \ N + C** - Only records needing new versions\n6. **Add SCD Metadata** - VALID_FROM,\
+        \ VALID_TO, IS_CURRENT, VERSION++\n7. **Select Final Columns** - Remove helper\
+        \ columns (CUSTOMER_KEY excluded for IDENTITY)\n8. **Append New Versions**\
+        \ - Insert new versions (CUSTOMER_KEY auto-generated)\n\n**⚠️ CRITICAL LIMITATIONS**:\n\
+        1. **First Load**: If Gold is empty, all records show as \"D\" and are filtered\
+        \ out. Use Initial Load pipeline first.\n2. **Closing Old Versions**: This\
+        \ only INSERTS new versions. Old versions remain IS_CURRENT=TRUE.\n   To properly\
+        \ implement SCD Type 2, add orchestration SQL Script to UPDATE old versions:\n\
+        \   ```sql\n   UPDATE DIM_CUSTOMER \n   SET IS_CURRENT = FALSE, \n       VALID_TO\
+        \ = CURRENT_TIMESTAMP(),\n       UPDATED_TIMESTAMP = CURRENT_TIMESTAMP()\n\
+        \   WHERE CUSTOMER_ID IN (\n     SELECT DISTINCT CUSTOMER_ID \n     FROM DIM_CUSTOMER\
+        \ \n     WHERE IS_CURRENT = TRUE\n     GROUP BY CUSTOMER_ID \n     HAVING\
+        \ COUNT(*) > 1\n   )\n   AND VERSION_NUMBER < (\n     SELECT MAX(VERSION_NUMBER)\
+        \ \n     FROM DIM_CUSTOMER c2 \n     WHERE c2.CUSTOMER_ID = DIM_CUSTOMER.CUSTOMER_ID\n\
+        \   );\n   ```\n\n**Tracks Changes To**: SEGMENT, TIER, STATUS, CUSTOMER_NAME,\
+        \ EMAIL, PHONE, LIFETIME_VALUE\n"

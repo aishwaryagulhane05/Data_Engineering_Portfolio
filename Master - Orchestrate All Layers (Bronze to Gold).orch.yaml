@@ -1,0 +1,138 @@
+type: "orchestration"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Master orchestration - Complete end-to-end pipeline from Bronze\
+      \ → Silver → Gold"
+  components:
+    Start:
+      type: "start"
+      transitions:
+        unconditional:
+        - "Load Bronze to Silver"
+      parameters:
+        componentName: "Start"
+    Load Bronze to Silver:
+      type: "run-orchestration"
+      transitions:
+        success:
+        - "Load Silver to Gold"
+      parameters:
+        componentName: "Load Bronze to Silver"
+        orchestrationJob: "Bronze to Silver/Master - Orchestrate Silver Layer.orch.yaml"
+        setScalarVariables:
+        - - "bronze_database"
+          - "${bronze_database}"
+        - - "bronze_schema"
+          - "${bronze_schema}"
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+    Load Silver to Gold:
+      type: "run-orchestration"
+      parameters:
+        componentName: "Load Silver to Gold"
+        orchestrationJob: "Silver to Gold/Master - Orchestrate Gold Layer.orch.yaml"
+        setScalarVariables:
+        - - "silver_database"
+          - "${silver_database}"
+        - - "silver_schema"
+          - "${silver_schema}"
+        - - "gold_database"
+          - "${gold_database}"
+        - - "gold_schema"
+          - "${gold_schema}"
+        - - "watermark_default"
+          - "${watermark_default}"
+  variables:
+    bronze_database:
+      metadata:
+        type: "TEXT"
+        description: "Bronze layer database name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    bronze_schema:
+      metadata:
+        type: "TEXT"
+        description: "Bronze layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "BRONZE"
+    silver_database:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer database name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    silver_schema:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "SILVER"
+    gold_database:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer database name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+    watermark_default:
+      metadata:
+        type: "TEXT"
+        description: "Default watermark for first fact load"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "1900-01-01"
+design:
+  components:
+    Start:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: 1
+    Load Bronze to Silver:
+      position:
+        x: 200
+        "y": 0
+      tempMetlId: 2
+    Load Silver to Gold:
+      position:
+        x: 450
+        "y": 0
+      tempMetlId: 3
+  notes:
+    "1":
+      position:
+        x: -90
+        "y": -360
+      size:
+        height: 370
+        width: 700
+      theme: "light-green"
+      content: |
+        ### 🚀 Master Pipeline - Complete Medallion Architecture
+
+        **End-to-End Data Flow**: Bronze → Silver → Gold
+
+        **Phase 1: Bronze → Silver** (6 tables in parallel)
+        - Performance, Products, Channels, Customers, Campaigns, Sales
+        - Flattens JSON, applies data quality rules
+
+        **Phase 2: Silver → Gold** (5 dimensions + 2 facts)
+        - **Dimensions** (parallel): DIM_DATE, DIM_PRODUCT, DIM_CUSTOMER, DIM_CAMPAIGN, DIM_CHANNEL
+        - **Facts** (sequential): FACT_PERFORMANCE, FACT_SALES
+
+        **Execution Time**: Target < 20 minutes
+        **Schedule**: Daily at 2:00 AM

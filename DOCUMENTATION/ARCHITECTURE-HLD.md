@@ -201,39 +201,39 @@ Unified marketing analytics data warehouse:
            DIM_CUSTOMER
                 │
                 │
-  DIM_DATE ───┼─── FACT_SALES ─── DIM_PRODUCT
+  DIM_DATE ──FACT_SALES─── DIM_PRODUCT
                 │
                 │
            DIM_CAMPAIGN
 
 
-        DIM_CHANNEL
-             │
-             │
-  DIM_DATE ──┴── FACT_PERFORMANCE
+              DIM_CHANNEL
+                  │
+                  │
+  DIM_DATE ─--── FACT_PERFORMANCE
 ```
 
 ### 4.2 Dimensions (5)
 
-| Dimension | Natural Key | Attributes | SCD Type |
-|-----------|-------------|------------|----------|
-| **DIM_CAMPAIGN** | campaign_id | name, type, budget, dates | Type 1 |
-| **DIM_CUSTOMER** | customer_id | name, email, segment, tier | Type 1 |
-| **DIM_PRODUCT** | product_id | name, category, price, margin | Type 1 |
-| **DIM_CHANNEL** | channel_id | name, type, category | Type 1 |
-| **DIM_DATE** | date_key | year, quarter, month, week | Static |
+| Dimension | Natural Key | Attributes | SCD Type | Implementation |
+|-----------|-------------|------------|----------|----------------|
+| **DIM_CAMPAIGN** | campaign_id | name, type, budget, status, dates | **Type 2** | Detect Changes |
+| **DIM_CUSTOMER** | customer_id | name, email, segment, tier, status | **Type 2** | Detect Changes |
+| **DIM_PRODUCT** | product_id | name, category, price, margin | **Type 1** | Full Refresh |
+| **DIM_CHANNEL** | channel_id | name, type, category | **Type 3** | Previous+Current |
+| **DIM_DATE** | date_key | year, quarter, month, week, day | **Static** | Pre-generated |
 
-### 4.3 Facts (2)
+### 4.3 Facts (3)
 
-#### **FACT_SALES** (Transactional)
+#### **FACT_SALES** (Transactional - Append Only)
 **Grain:** One row per order line item
+**Load Strategy:** Incremental with watermark
 
 **Foreign Keys:**
-- dim_customer_sk
-- dim_product_sk
-- dim_campaign_sk
-- dim_date_sk
-- dim_time_sk
+- customer_key (→ DIM_CUSTOMER, IS_CURRENT=TRUE)
+- product_key (→ DIM_PRODUCT)
+- campaign_key (→ DIM_CAMPAIGN, IS_CURRENT=TRUE, nullable)
+- date_key (→ DIM_DATE)
 
 **Measures:**
 - quantity
@@ -242,14 +242,18 @@ Unified marketing analytics data warehouse:
 - tax_amount
 - line_total
 - revenue
+- discount_percent (calculated)
 
-#### **FACT_PERFORMANCE** (Daily snapshot)
+**Load Pattern:** `WHERE LOAD_TIMESTAMP > MAX(LOAD_TIMESTAMP)`
+
+#### **FACT_PERFORMANCE** (Daily Snapshot - Append Only)
 **Grain:** One row per campaign per channel per day
+**Load Strategy:** Incremental with watermark
 
 **Foreign Keys:**
-- dim_campaign_sk
-- dim_channel_sk
-- dim_date_sk
+- campaign_key (→ DIM_CAMPAIGN, IS_CURRENT=TRUE)
+- channel_key (→ DIM_CHANNEL)
+- date_key (→ DIM_DATE)
 
 **Measures:**
 - impressions
@@ -259,19 +263,197 @@ Unified marketing analytics data warehouse:
 - revenue
 - ctr (click-through rate)
 - cpc (cost per click)
+- cpa (cost per acquisition)
 - roas (return on ad spend)
+- conversion_rate (calculated)
 
-### 4.4 Implementation Detail
+**Load Pattern:** `WHERE LOAD_TIMESTAMP > MAX(LOAD_TIMESTAMP)`
 
-**Gold Layer = Views (Not Tables)**
+#### **FACT_CAMPAIGN_DAILY** (Pre-Aggregated Summary)
+**Grain:** One row per campaign per day
+**Load Strategy:** Replace/Merge daily
 
-Benefits:
-- ⚡ No data duplication (reads from ODS)
-- ⚡ Always current (no refresh lag)
-- ⚡ Easy to modify derived logic
-- ⚡ Lower storage costs
+**Foreign Keys:**
+- campaign_key
+- date_key
 
-**See [ARCHITECTURE-LLD.md](ARCHITECTURE-LLD.md#2-final-dimensional-model-gold-layer) for complete DDL**
+**Measures:**
+- total_impressions
+- total_clicks
+- total_cost
+- total_revenue
+- avg_ctr
+- avg_cpc
+- channel_count
+
+**Load Pattern:** Aggregated from FACT_PERFORMANCE
+
+### 4.4 SCD Implementation Details
+
+#### **SCD Type 2: DIM_CAMPAIGN & DIM_CUSTOMER**
+
+**Structure:**
+```sql
+-- Surrogate Key
+campaign_key (IDENTITY) PRIMARY KEY
+
+-- Natural Key
+campaign_id (VARCHAR) 
+
+-- Tracked Attributes
+campaign_name, campaign_type, status, budget, objective
+
+-- SCD Type 2 Columns
+valid_from TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+valid_to TIMESTAMP_NTZ DEFAULT '9999-12-31 23:59:59'
+is_current BOOLEAN DEFAULT TRUE
+version_number NUMBER DEFAULT 1
+
+CONSTRAINT UNIQUE (campaign_id, is_current)
+```
+
+**Implementation Pattern (Matillion):**
+1. **Table Input** - Load Silver source data
+2. **Table Input** - Load existing Gold dimension
+3. **Filter** - Get current versions only (IS_CURRENT = TRUE)
+4. **Detect Changes** - Compare on tracked attributes
+   - Outputs: I (Insert), C (Change), U (Unchanged), D (Delete)
+5. **Filter** - Keep only I + C records
+6. **Calculator** - Add SCD Type 2 columns:
+   - VALID_FROM = CURRENT_TIMESTAMP()
+   - VALID_TO = '9999-12-31 23:59:59'
+   - IS_CURRENT = TRUE
+   - VERSION_NUMBER = MAX(version) + 1
+7. **SQL** - Close old versions:
+   ```sql
+   UPDATE DIM_CAMPAIGN
+   SET VALID_TO = CURRENT_TIMESTAMP(),
+       IS_CURRENT = FALSE
+   WHERE CAMPAIGN_ID IN (changed_records)
+     AND IS_CURRENT = TRUE
+   ```
+8. **Table Output** - Insert new versions (Append mode)
+
+**Why Type 2?**
+- ✅ Campaign budget changes affect ROI analysis
+- ✅ Status changes (Active → Paused → Active) matter for reporting
+- ✅ Historical accuracy: "What was the budget when this sale occurred?"
+- ✅ Segment changes drive customer analytics
+
+**Example:**
+```
+CAMPAIGN_001:
+v1: BUDGET=$10K, STATUS=Active   (2024-01-01 to 2024-02-15, IS_CURRENT=FALSE)
+v2: BUDGET=$15K, STATUS=Active   (2024-02-15 to 2024-03-01, IS_CURRENT=FALSE)
+v3: BUDGET=$15K, STATUS=Paused   (2024-03-01 to 9999-12-31, IS_CURRENT=TRUE)
+```
+
+#### **SCD Type 3: DIM_CHANNEL**
+
+**Structure:**
+```sql
+-- Surrogate Key
+channel_key (IDENTITY) PRIMARY KEY
+
+-- Natural Key
+channel_id (VARCHAR) UNIQUE
+
+-- Current Attributes
+channel_name, channel_type, current_category
+
+-- Previous Attributes (Type 3)
+previous_category
+category_changed_date
+```
+
+**Implementation Pattern:**
+1. **Table Input** - Load Silver channels
+2. **Table Input** - Load existing Gold DIM_CHANNEL
+3. **Join** - Match on channel_id
+4. **Calculator** - Detect category changes:
+   - IF silver.category ≠ gold.current_category THEN
+     - previous_category = gold.current_category
+     - current_category = silver.category
+     - category_changed_date = CURRENT_TIMESTAMP()
+5. **Rewrite Table** - Replace dimension (full refresh)
+
+**Why Type 3?**
+- ✅ Limited history needed (just previous state)
+- ✅ Simpler than Type 2 for single attribute tracking
+- ✅ Business case: "Compare performance before/after recategorization"
+- ✅ No need for versioning multiple attributes
+
+**Example:**
+```
+CHANNEL_003:
+CURRENT_CATEGORY = "Display Advertising"
+PREVIOUS_CATEGORY = "Social Media"
+CATEGORY_CHANGED_DATE = 2024-02-15
+
+Query: SELECT channel_name, current_category, previous_category
+Usage: "Show channels that moved from Social Media to Display"
+```
+
+#### **SCD Type 1: DIM_PRODUCT**
+
+**Structure:**
+```sql
+-- Surrogate Key
+product_key (IDENTITY) PRIMARY KEY
+
+-- Natural Key
+product_id (VARCHAR) UNIQUE
+
+-- Attributes (overwrite on change)
+product_name, category, price, cost, margin
+
+-- Audit (no history tracking)
+created_timestamp, updated_timestamp
+```
+
+**Implementation Pattern:**
+1. **Table Input** - Load MTLN_SILVER_PRODUCTS
+2. **Calculator** - Add timestamps
+3. **Rewrite Table** - Replace entire dimension
+
+**Why Type 1?**
+- ✅ Product corrections don't require history
+- ✅ Price changes tracked in facts (historical orders preserved)
+- ✅ Simplicity preferred for reference data
+- ✅ No business requirement for product history
+
+#### **Facts: NOT SCD (Immutable Transactions)**
+
+**Pattern:** Incremental Loading with Watermark
+
+```sql
+-- Incremental load pattern
+WHERE source.LOAD_TIMESTAMP > (
+    SELECT COALESCE(MAX(LOAD_TIMESTAMP), '1900-01-01'::TIMESTAMP)
+    FROM FACT_SALES
+)
+```
+
+**Why NO SCD for Facts?**
+- ❌ Transactions are **immutable events** (sale on 2024-01-15 never changes)
+- ❌ No "versions" of a transaction
+- ❌ Detect Changes inappropriate (compares all history unnecessarily)
+- ✅ Watermark filters efficiently for NEW records only
+- ✅ Append-only pattern: INSERT only, never UPDATE
+
+**Fact-Dimension Join Pattern:**
+```sql
+-- Facts join to CURRENT dimension versions
+SELECT f.*, c.SEGMENT, c.TIER
+FROM FACT_SALES f
+JOIN DIM_CUSTOMER c 
+  ON f.CUSTOMER_KEY = c.CUSTOMER_KEY
+  AND c.IS_CURRENT = TRUE  -- Critical for SCD Type 2
+```
+
+**First Load vs Incremental:**
+- **First Load**: MAX returns NULL → COALESCE uses '1900-01-01' → Loads ALL
+- **Incremental**: MAX returns actual timestamp → Loads only NEW
 
 ---
 
@@ -303,39 +485,112 @@ Benefits:
 - Load only new/changed records
 - 97% faster than full refresh
 
-### 5.3 SCD Type 1 (Overwrite)
+### 5.3 SCD Strategy: Mixed Types Based on Business Needs
 
-**Decision:** Use Type 1 (overwrite) instead of Type 2 (history tracking)
+**Decision:** Use different SCD types per dimension based on business requirements
 
-**Rationale:**
-- ✅ Simpler implementation
-- ✅ Faster queries (no date range filters)
-- ✅ History not required for this use case
-- ✅ Matches SFDC pattern proven in production
-
-**Trade-off:** If historical dimension changes needed later, implement Type 2 in Silver layer
-
-### 5.4 Gold as Views
-
-**Decision:** Implement Gold layer as views, not tables
-
-**Rationale:**
-- ✅ Single source of truth (ODS tables)
-- ✅ No refresh lag or sync issues
-- ✅ 50% lower storage costs
-- ✅ Instant updates when ODS changes
-
-**Trade-off:** Slightly slower queries (negligible with Snowflake clustering)
-
-### 5.5 Surrogate Keys via Sequences
-
-**Decision:** Use Snowflake sequences with DEFAULT values
+**Implementation:**
+- **Type 2 (Full History)**: DIM_CAMPAIGN, DIM_CUSTOMER
+  - Budget/status/segment changes require historical tracking
+  - Critical for "as-of" analysis
+  - Pattern: Detect Changes → Close old → Insert new versions
+  
+- **Type 3 (Previous + Current)**: DIM_CHANNEL
+  - Limited history sufficient (before/after comparison)
+  - Simpler than Type 2 for single attribute
+  - Pattern: Compare → Update previous → Update current
+  
+- **Type 1 (Overwrite)**: DIM_PRODUCT
+  - Corrections don't need history
+  - Price history preserved in fact tables
+  - Pattern: Full refresh/Replace
+  
+- **Static**: DIM_DATE
+  - Pre-generated, never changes
+  - Pattern: One-time load
 
 **Rationale:**
-- ✅ Auto-generation (no pipeline logic)
-- ✅ Guaranteed uniqueness
-- ✅ Preserved on UPDATE (MERGE)
-- ✅ Follows Snowflake best practices
+- ✅ **Business-driven**: Each type serves specific analytics needs
+- ✅ **Performance**: Type 1/3 simpler where Type 2 unnecessary
+- ✅ **Flexibility**: Can upgrade Type 1→2 if requirements change
+- ✅ **Best Practice**: Kimball recommends mixed SCD types
+
+**Trade-off:** More complexity in documentation, but optimal for each use case
+
+### 5.4 Gold Layer: Physical Tables (Not Views)
+
+**Decision:** Implement Gold layer as physical tables with IDENTITY keys
+
+**Rationale:**
+- ✅ **SCD Type 2 Support**: Views cannot maintain versioning state
+- ✅ **Surrogate Keys**: IDENTITY columns require physical tables
+- ✅ **Performance**: Clustered physical tables faster than views
+- ✅ **Incremental Loading**: Facts use watermark pattern (requires persistence)
+- ✅ **Foreign Key Constraints**: Enforce referential integrity
+
+**Structure:**
+```sql
+-- Dimensions: Physical tables with IDENTITY keys
+CREATE TABLE DIM_CAMPAIGN (
+    CAMPAIGN_KEY NUMBER IDENTITY(1,1) PRIMARY KEY,
+    CAMPAIGN_ID VARCHAR(100),
+    ...
+    VALID_FROM TIMESTAMP_NTZ,
+    IS_CURRENT BOOLEAN,
+    UNIQUE (CAMPAIGN_ID, IS_CURRENT)
+)
+
+-- Facts: Physical tables with IDENTITY keys + FKs
+CREATE TABLE FACT_SALES (
+    SALES_KEY NUMBER IDENTITY(1,1) PRIMARY KEY,
+    CUSTOMER_KEY NUMBER REFERENCES DIM_CUSTOMER,
+    ...
+    LOAD_TIMESTAMP TIMESTAMP_NTZ  -- Watermark column
+)
+```
+
+**Trade-off:** Higher storage cost than views, but required for SCD patterns and incremental loading
+
+### 5.5 Fact Loading: Incremental with Watermark (NOT SCD)
+
+**Decision:** Facts use incremental loading, NOT SCD change detection
+
+**Pattern:**
+```sql
+WHERE source.LOAD_TIMESTAMP > (
+    SELECT COALESCE(MAX(LOAD_TIMESTAMP), '1900-01-01'::TIMESTAMP)
+    FROM FACT_TABLE
+)
+```
+
+**Rationale:**
+- ✅ **Facts are immutable**: Transactions occurred, they don't "change"
+- ✅ **Performance**: Watermark filters 95%+ faster than Detect Changes
+- ✅ **Simplicity**: No versioning complexity needed
+- ✅ **Industry Standard**: Transactional facts = append-only
+
+**Why NOT Detect Changes for Facts:**
+- ❌ Detect Changes compares ALL historical records (expensive)
+- ❌ Sales on 2024-01-15 never become "changed" on 2024-01-16
+- ❌ No business case for "versions" of a transaction
+- ✅ Just need NEW transactions (watermark sufficient)
+
+**First Load Handling:**
+- Empty table → MAX returns NULL → COALESCE('1900-01-01') → Loads ALL
+- Populated table → MAX returns timestamp → Loads only NEW
+- Idempotent: Safe to re-run, won't load duplicates
+
+**Example:**
+```sql
+-- Day 1: First load (empty FACT_SALES)
+WHERE LOAD_TIMESTAMP > '1900-01-01'  -- Loads all 50K records
+
+-- Day 2: Incremental
+WHERE LOAD_TIMESTAMP > '2024-12-21 08:00:00'  -- Loads only 500 new
+
+-- Day 3: Incremental  
+WHERE LOAD_TIMESTAMP > '2024-12-22 08:00:00'  -- Loads only 480 new
+```
 
 ---
 

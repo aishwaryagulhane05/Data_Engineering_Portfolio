@@ -1,0 +1,142 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Incremental load from Bronze to Silver for Products using watermark-based\
+      \ detection with automatic first-load handling"
+  components:
+    Incremental Load with Watermark:
+      type: "sql"
+      parameters:
+        componentName: "Incremental Load with Watermark"
+        query: |
+          -- Incremental load with watermark detection using variables
+          SELECT
+              UPPER(TRIM("PRODUCT_ID")) AS product_id,
+              UPPER(TRIM("SKU")) AS sku,
+              COALESCE("PRODUCT_NAME", 'Unknown Product') AS product_name,
+              COALESCE("CATEGORY", 'Uncategorized') AS category,
+              COALESCE("SUBCATEGORY", 'General') AS subcategory,
+              COALESCE("BRAND", 'Generic') AS brand,
+              COALESCE("UNIT_PRICE", 0.00) AS unit_price,
+              COALESCE("COST", 0.00) AS cost,
+              COALESCE("MARGIN", 0.00) AS margin,
+              COALESCE("MARGIN_PERCENT", 0.0000) AS margin_percent,
+              COALESCE("PRODUCT_STATUS", 'Active') AS product_status,
+              "SOURCE_SYSTEM" AS source_system,
+              "LAST_MODIFIED_TIMESTAMP" AS last_modified_timestamp,
+              CURRENT_TIMESTAMP() AS load_timestamp
+          FROM ${bronze_database}.${bronze_schema}.MTLN_BRONZE_PRODUCTS
+          WHERE "LOAD_TIMESTAMP" > (
+              SELECT COALESCE(MAX("LOAD_TIMESTAMP"), '${watermark_default}'::TIMESTAMP)
+              FROM ${silver_database}.${silver_schema}.MTLN_SILVER_PRODUCTS
+          )
+    Write to Silver:
+      type: "table-output"
+      sources:
+      - "Incremental Load with Watermark"
+      parameters:
+        componentName: "Write to Silver"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "SILVER"
+        targetTable: "MTLN_SILVER_PRODUCTS"
+        fixDataTypeMismatches: "No"
+        columnMapping:
+        - - "product_id"
+          - "PRODUCT_ID"
+        - - "sku"
+          - "SKU"
+        - - "product_name"
+          - "PRODUCT_NAME"
+        - - "category"
+          - "CATEGORY"
+        - - "subcategory"
+          - "SUBCATEGORY"
+        - - "brand"
+          - "BRAND"
+        - - "unit_price"
+          - "UNIT_PRICE"
+        - - "cost"
+          - "COST"
+        - - "margin"
+          - "MARGIN"
+        - - "margin_percent"
+          - "MARGIN_PERCENT"
+        - - "product_status"
+          - "PRODUCT_STATUS"
+        - - "source_system"
+          - "SOURCE_SYSTEM"
+        - - "last_modified_timestamp"
+          - "LAST_MODIFIED_TIMESTAMP"
+        - - "load_timestamp"
+          - "LOAD_TIMESTAMP"
+        outputMode: "Append"
+  variables:
+    bronze_database:
+      metadata:
+        type: "TEXT"
+        description: "Bronze layer database name - override for different environments"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    bronze_schema:
+      metadata:
+        type: "TEXT"
+        description: "Bronze layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "BRONZE"
+    silver_database:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer database name - override for different environments"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    silver_schema:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "SILVER"
+    watermark_default:
+      metadata:
+        type: "TEXT"
+        description: "Default watermark date for first load - change to force reload\
+          \ from specific date"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "1900-01-01"
+design:
+  components:
+    Incremental Load with Watermark:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: null
+    Write to Silver:
+      position:
+        x: 320
+        "y": 0
+      tempMetlId: null
+  notes:
+    "1":
+      position:
+        x: 0
+        "y": -335
+      size:
+        height: 315
+        width: 650
+      theme: "light-blue"
+      content: |
+        ### Incremental Load - Products (1K rows, Catalog Data)
+
+        **Watermark**: Bronze `LOAD_TIMESTAMP` > Silver `MAX(LOAD_TIMESTAMP)`
+
+        - **First Load**: Empty table → loads all 1,000 product catalog records
+        - **Incremental**: Only new/changed products (price updates, new SKUs)
+        - **Quality**: Standardization, category defaults, pricing validation
+
+        **Volume**: Medium (1K rows), daily changes ~10-50 records, subsecond loads

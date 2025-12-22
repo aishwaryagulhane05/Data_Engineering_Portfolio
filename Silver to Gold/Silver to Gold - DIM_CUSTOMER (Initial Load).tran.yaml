@@ -1,0 +1,142 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "DIM_CUSTOMER - Initial load with SCD Type 2 structure (RUN ONCE)"
+  components:
+    Load Silver Customers:
+      type: "table-input"
+      parameters:
+        componentName: "Load Silver Customers"
+        database: "[Environment Default]"
+        schema: "SILVER"
+        targetTable: "MTLN_SILVER_CUSTOMERS"
+        columnNames:
+        - "CUSTOMER_ID"
+        - "CUSTOMER_NAME"
+        - "EMAIL"
+        - "PHONE"
+        - "SEGMENT"
+        - "TIER"
+        - "STATUS"
+        - "LIFETIME_VALUE"
+        - "EMAIL_VALID"
+        - "PHONE_VALID"
+        - "SOURCE_SYSTEM"
+    Add SCD Type 2 Columns:
+      type: "calculator"
+      sources:
+      - "Load Silver Customers"
+      parameters:
+        componentName: "Add SCD Type 2 Columns"
+        includeInputColumns: "Yes"
+        calculations:
+        - - "CURRENT_TIMESTAMP()"
+          - "VALID_FROM"
+        - - "'9999-12-31 23:59:59'::TIMESTAMP_NTZ"
+          - "VALID_TO"
+        - - "TRUE"
+          - "IS_CURRENT"
+        - - "1"
+          - "VERSION_NUMBER"
+        - - "CURRENT_TIMESTAMP()"
+          - "CREATED_TIMESTAMP"
+        - - "CURRENT_TIMESTAMP()"
+          - "UPDATED_TIMESTAMP"
+    MTLN_GOLD_CUSTOMER:
+      type: "table-output"
+      sources:
+      - "Add SCD Type 2 Columns"
+      parameters:
+        componentName: "MTLN_GOLD_CUSTOMER"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "GOLD"
+        targetTable: "DIM_CUSTOMER"
+        fixDataTypeMismatches: "No"
+        columnMapping:
+        - - "CUSTOMER_ID"
+          - "CUSTOMER_ID"
+        - - "CUSTOMER_NAME"
+          - "CUSTOMER_NAME"
+        - - "EMAIL"
+          - "EMAIL"
+        - - "PHONE"
+          - "PHONE"
+        - - "SEGMENT"
+          - "SEGMENT"
+        - - "TIER"
+          - "TIER"
+        - - "STATUS"
+          - "STATUS"
+        - - "LIFETIME_VALUE"
+          - "LIFETIME_VALUE"
+        - - "EMAIL_VALID"
+          - "EMAIL_VALID"
+        - - "PHONE_VALID"
+          - "PHONE_VALID"
+        - - "VALID_FROM"
+          - "VALID_FROM"
+        - - "VALID_TO"
+          - "VALID_TO"
+        - - "IS_CURRENT"
+          - "IS_CURRENT"
+        - - "VERSION_NUMBER"
+          - "VERSION_NUMBER"
+        - - "CREATED_TIMESTAMP"
+          - "CREATED_TIMESTAMP"
+        - - "UPDATED_TIMESTAMP"
+          - "UPDATED_TIMESTAMP"
+        - - "SOURCE_SYSTEM"
+          - "SOURCE_SYSTEM"
+        orderBy:
+        outputMode: "Append"
+      postProcessing:
+        updateOutputMessage:
+        updateScalarVariables:
+  variables:
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema name - change to DEV if permissions issue"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+design:
+  components:
+    Load Silver Customers:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: 1
+    Add SCD Type 2 Columns:
+      position:
+        x: 160
+        "y": 0
+      tempMetlId: 2
+    MTLN_GOLD_CUSTOMER:
+      position:
+        x: 350
+        "y": 0
+      tempMetlId: 4
+  notes:
+    "1":
+      position:
+        x: -10
+        "y": -350
+      size:
+        height: 330
+        width: 470
+      theme: "yellow"
+      content: |
+        ### DIM_CUSTOMER - Initial Load
+
+        **PURPOSE**: Creates table with SCD Type 2 structure
+        **RUN**: Once only (first time setup)
+
+        **What it does**:
+        - Loads all customers from Silver
+        - Adds SCD Type 2 columns (VALID_FROM/TO, IS_CURRENT, VERSION)
+        - All records get IS_CURRENT = TRUE, VERSION = 1
+
+        **After success**: Switch to SCD Type 2 pipeline for daily updates

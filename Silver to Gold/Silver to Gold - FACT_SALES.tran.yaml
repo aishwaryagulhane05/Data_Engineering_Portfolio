@@ -1,0 +1,161 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Load FACT_SALES with incremental loading and dimension key lookups"
+  components:
+    Incremental Load from Silver:
+      type: "sql"
+      parameters:
+        componentName: "Incremental Load from Silver"
+        query: |
+          SELECT
+              s.ORDER_ID,
+              s.ORDER_LINE_ID,
+              s.ORDER_TIMESTAMP,
+              cust.CUSTOMER_KEY,
+              prod.PRODUCT_KEY,
+              camp.CAMPAIGN_KEY,
+              d.DATE_KEY,
+              s.QUANTITY,
+              s.UNIT_PRICE,
+              s.DISCOUNT_AMOUNT,
+              s.TAX_AMOUNT,
+              s.LINE_TOTAL,
+              s.REVENUE,
+              CASE WHEN s.LINE_TOTAL > 0 THEN (s.DISCOUNT_AMOUNT / s.LINE_TOTAL) * 100 ELSE 0 END AS DISCOUNT_PERCENT,
+              CURRENT_TIMESTAMP() AS LOAD_TIMESTAMP,
+              s.SOURCE_SYSTEM
+          FROM ${silver_database}.${silver_schema}.MTLN_SILVER_SALES s
+          INNER JOIN ${gold_database}.${gold_schema}.DIM_CUSTOMER cust
+              ON s.CUSTOMER_ID = cust.CUSTOMER_ID AND cust.IS_CURRENT = TRUE
+          INNER JOIN ${gold_database}.${gold_schema}.DIM_PRODUCT prod
+              ON s.PRODUCT_ID = prod.PRODUCT_ID
+          LEFT JOIN ${gold_database}.${gold_schema}.DIM_CAMPAIGN camp
+              ON s.CAMPAIGN_ID = camp.CAMPAIGN_ID AND camp.IS_CURRENT = TRUE
+          INNER JOIN ${gold_database}.${gold_schema}.DIM_DATE d
+              ON TO_NUMBER(TO_CHAR(s.ORDER_DATE, 'YYYYMMDD')) = d.DATE_KEY
+          WHERE s.LOAD_TIMESTAMP > (
+              SELECT COALESCE(MAX(LOAD_TIMESTAMP), '${watermark_default}'::TIMESTAMP)
+              FROM ${gold_database}.${gold_schema}.FACT_SALES
+          )
+    Write to FACT_SALES:
+      type: "table-output"
+      sources:
+      - "Incremental Load from Silver"
+      parameters:
+        componentName: "Write to FACT_SALES"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "${gold_schema}"
+        targetTable: "FACT_SALES"
+        outputMode: "Append"
+        columnMapping:
+        - - "ORDER_ID"
+          - "ORDER_ID"
+        - - "ORDER_LINE_ID"
+          - "ORDER_LINE_ID"
+        - - "ORDER_TIMESTAMP"
+          - "ORDER_TIMESTAMP"
+        - - "CUSTOMER_KEY"
+          - "CUSTOMER_KEY"
+        - - "PRODUCT_KEY"
+          - "PRODUCT_KEY"
+        - - "CAMPAIGN_KEY"
+          - "CAMPAIGN_KEY"
+        - - "DATE_KEY"
+          - "DATE_KEY"
+        - - "QUANTITY"
+          - "QUANTITY"
+        - - "UNIT_PRICE"
+          - "UNIT_PRICE"
+        - - "DISCOUNT_AMOUNT"
+          - "DISCOUNT_AMOUNT"
+        - - "TAX_AMOUNT"
+          - "TAX_AMOUNT"
+        - - "LINE_TOTAL"
+          - "LINE_TOTAL"
+        - - "REVENUE"
+          - "REVENUE"
+        - - "DISCOUNT_PERCENT"
+          - "DISCOUNT_PERCENT"
+        - - "LOAD_TIMESTAMP"
+          - "LOAD_TIMESTAMP"
+        - - "SOURCE_SYSTEM"
+          - "SOURCE_SYSTEM"
+        fixDataTypeMismatches: "No"
+  variables:
+    silver_database:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer database name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    silver_schema:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "SILVER"
+    gold_database:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer database name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+    watermark_default:
+      metadata:
+        type: "TEXT"
+        description: "Default watermark for first load"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "1900-01-01"
+design:
+  components:
+    Write to FACT_SALES:
+      position:
+        x: 160
+        "y": 0
+      tempMetlId: 2
+    Incremental Load from Silver:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: 1
+  notes:
+    "1":
+      position:
+        x: -10
+        "y": -505
+      size:
+        height: 485
+        width: 400
+      theme: "yellow"
+      content: |
+        ### FACT_SALES (Incremental)
+
+        **Load Strategy**: Incremental with watermark
+
+        - **Source**: MTLN_SILVER_SALES
+        - **Grain**: One row per order line
+        - **Watermark**: LOAD_TIMESTAMP
+
+        **Dimension Lookups**:
+        - CUSTOMER_KEY (IS_CURRENT = TRUE)
+        - PRODUCT_KEY
+        - CAMPAIGN_KEY (nullable)
+        - DATE_KEY
+
+        **Metrics**: Quantity, Revenue, Discounts, Tax
+
+        **Performance**: Incremental = 95%+ faster

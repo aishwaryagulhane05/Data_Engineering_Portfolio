@@ -1,0 +1,158 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "DIM_CHANNEL - SCD Type 3 (full refresh with previous/current category tracking)"
+  components:
+    Load Silver Channels:
+      type: "table-input"
+      parameters:
+        componentName: "Load Silver Channels"
+        database: "[Environment Default]"
+        schema: "SILVER"
+        targetTable: "MTLN_SILVER_CHANNELS"
+        columnNames:
+          - "CHANNEL_ID"
+          - "CHANNEL_NAME"
+          - "CHANNEL_TYPE"
+          - "CATEGORY"
+          - "COST_STRUCTURE"
+          - "SOURCE_SYSTEM"
+    Add SCD Type 3 Columns:
+      type: "calculator"
+      sources:
+        - "Load Silver Channels"
+      parameters:
+        componentName: "Add SCD Type 3 Columns"
+        includeInputColumns: "Yes"
+        calculations:
+          - - "\"CATEGORY\""
+            - "CURRENT_CATEGORY"
+          - - "NULL"
+            - "PREVIOUS_CATEGORY"
+          - - "NULL"
+            - "CATEGORY_CHANGED_DATE"
+          - - "CURRENT_TIMESTAMP()"
+            - "CREATED_TIMESTAMP"
+          - - "CURRENT_TIMESTAMP()"
+            - "UPDATED_TIMESTAMP"
+    Select Final Columns:
+      type: "sql"
+      sources:
+        - "Add SCD Type 3 Columns"
+      parameters:
+        componentName: "Select Final Columns"
+        query: |
+          SELECT 
+            "CHANNEL_ID",
+            "CHANNEL_NAME",
+            "CHANNEL_TYPE",
+            "CURRENT_CATEGORY",
+            "COST_STRUCTURE",
+            "PREVIOUS_CATEGORY",
+            "CATEGORY_CHANGED_DATE",
+            "CREATED_TIMESTAMP",
+            "UPDATED_TIMESTAMP",
+            "SOURCE_SYSTEM"
+          FROM $T{Add SCD Type 3 Columns}
+    Update DIM_CHANNEL:
+      type: "table-update"
+      sources:
+        - "Select Final Columns"
+      parameters:
+        componentName: "Update DIM_CHANNEL"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "${gold_schema}"
+        targetTable: "DIM_CHANNEL"
+        targetAlias: "target"
+        sourceAlias: "source"
+        joinExpression:
+          - - "\"target\".\"CHANNEL_ID\" = \"source\".\"CHANNEL_ID\""
+            - "Case"
+        updateMapping:
+          - - "CHANNEL_NAME"
+            - "CHANNEL_NAME"
+          - - "CHANNEL_TYPE"
+            - "CHANNEL_TYPE"
+          - - "CURRENT_CATEGORY"
+            - "CURRENT_CATEGORY"
+          - - "COST_STRUCTURE"
+            - "COST_STRUCTURE"
+          - - "PREVIOUS_CATEGORY"
+            - "PREVIOUS_CATEGORY"
+          - - "CATEGORY_CHANGED_DATE"
+            - "CATEGORY_CHANGED_DATE"
+          - - "UPDATED_TIMESTAMP"
+            - "UPDATED_TIMESTAMP"
+          - - "SOURCE_SYSTEM"
+            - "SOURCE_SYSTEM"
+        includeNotMatched: "Yes"
+        insertMapping:
+          - - "CHANNEL_ID"
+            - "CHANNEL_ID"
+          - - "CHANNEL_NAME"
+            - "CHANNEL_NAME"
+          - - "CHANNEL_TYPE"
+            - "CHANNEL_TYPE"
+          - - "CURRENT_CATEGORY"
+            - "CURRENT_CATEGORY"
+          - - "COST_STRUCTURE"
+            - "COST_STRUCTURE"
+          - - "PREVIOUS_CATEGORY"
+            - "PREVIOUS_CATEGORY"
+          - - "CATEGORY_CHANGED_DATE"
+            - "CATEGORY_CHANGED_DATE"
+          - - "CREATED_TIMESTAMP"
+            - "CREATED_TIMESTAMP"
+          - - "UPDATED_TIMESTAMP"
+            - "UPDATED_TIMESTAMP"
+          - - "SOURCE_SYSTEM"
+            - "SOURCE_SYSTEM"
+  variables:
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+design:
+  components:
+    Load Silver Channels:
+      position:
+        x: 0
+        y: 0
+    Add SCD Type 3 Columns:
+      position:
+        x: 160
+        y: 0
+    Select Final Columns:
+      position:
+        x: 320
+        y: 0
+    Update DIM_CHANNEL:
+      position:
+        x: 480
+        y: 0
+  notes:
+    "1":
+      position:
+        x: -10
+        y: -320
+      size:
+        height: 300
+        width: 560
+      theme: "light-blue"
+      content: |
+        ### DIM_CHANNEL - SCD Type 3 (Simplified)
+        
+        **LOAD STRATEGY**: Full refresh (SCD Type 3 structure ready)
+        **RUN**: Daily
+        
+        **Component Flow**:
+        1. Load Silver (20 channels)
+        2. Add SCD Type 3 columns (CURRENT, PREVIOUS, CHANGED_DATE)
+        3. Rewrite entire table
+        
+        **Note**: For full SCD Type 3 tracking, use Table Update component to move CURRENT → PREVIOUS when category changes

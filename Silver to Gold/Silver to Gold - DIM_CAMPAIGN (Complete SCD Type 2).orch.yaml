@@ -1,0 +1,101 @@
+type: "orchestration"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Smart SCD Type 2 for DIM_CAMPAIGN"
+  components:
+    Start:
+      type: "start"
+      transitions:
+        unconditional:
+          - "Check Table Row Count"
+      parameters:
+        componentName: "Start"
+    Check Table Row Count:
+      type: "query-to-scalar"
+      transitions:
+        success:
+          - "Is Table Empty"
+      parameters:
+        componentName: "Check Table Row Count"
+        mode: "Advanced"
+        query: "SELECT COUNT(*) FROM ${gold_database}.${gold_schema}.DIM_CAMPAIGN"
+        scalarVariableMapping:
+          - - "table_row_count"
+            - "COUNT(*)"
+    Is Table Empty:
+      type: "if"
+      transitions:
+        "true":
+          - "Run Initial Load"
+        "false":
+          - "Run Incremental SCD Type 2"
+      parameters:
+        componentName: "Is Table Empty"
+        mode: "Simple"
+        condition:
+          - - "table_row_count"
+            - "Is"
+            - "Equal to"
+            - "0"
+        combineConditions: "And"
+    Run Initial Load:
+      type: "run-transformation"
+      parameters:
+        componentName: "Run Initial Load"
+        transformationJob: "Silver to Gold/Silver to Gold - DIM_CAMPAIGN (Initial Load).tran.yaml"
+        setScalarVariables:
+          - - "gold_schema"
+            - "${gold_schema}"
+    Run Incremental SCD Type 2:
+      type: "run-transformation"
+      parameters:
+        componentName: "Run Incremental SCD Type 2"
+        transformationJob: "Silver to Gold/Silver to Gold - DIM_CAMPAIGN (SCD Type 2).tran.yaml"
+        setScalarVariables:
+          - - "gold_schema"
+            - "${gold_schema}"
+  variables:
+    gold_database:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer database"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+    table_row_count:
+      metadata:
+        type: "NUMBER"
+        description: "Row count"
+        scope: "COPIED"
+        visibility: "PRIVATE"
+      defaultValue: "0"
+design:
+  components:
+    Start:
+      position:
+        x: 0
+        y: 0
+    Check Table Row Count:
+      position:
+        x: 160
+        y: 0
+    Is Table Empty:
+      position:
+        x: 320
+        y: 0
+    Run Initial Load:
+      position:
+        x: 480
+        y: -60
+    Run Incremental SCD Type 2:
+      position:
+        x: 480
+        y: 60

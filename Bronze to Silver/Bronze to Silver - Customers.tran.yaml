@@ -1,0 +1,133 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Incremental load from Bronze to Silver for Customers using watermark-based\
+      \ detection with automatic first-load handling"
+  components:
+    Incremental Load with Watermark:
+      type: "sql"
+      parameters:
+        componentName: "Incremental Load with Watermark"
+        query: |
+          -- Incremental load with watermark detection using variables
+          SELECT
+              UPPER(TRIM("CUSTOMER_ID")) AS customer_id,
+              COALESCE("CUSTOMER_NAME", 'Unknown Customer') AS customer_name,
+              LOWER(TRIM("EMAIL")) AS email,
+              "PHONE" AS phone,
+              COALESCE("SEGMENT", 'Unknown') AS segment,
+              COALESCE("TIER", 'Standard') AS tier,
+              COALESCE("STATUS", 'Active') AS status,
+              COALESCE("LIFETIME_VALUE", 0.00) AS lifetime_value,
+              "SOURCE_SYSTEM" AS source_system,
+              "LAST_MODIFIED_TIMESTAMP" AS last_modified_timestamp,
+              CURRENT_TIMESTAMP() AS load_timestamp
+          FROM ${bronze_database}.${bronze_schema}.MTLN_BRONZE_CUSTOMERS
+          WHERE "LOAD_TIMESTAMP" > (
+              SELECT COALESCE(MAX("LOAD_TIMESTAMP"), '${watermark_default}'::TIMESTAMP)
+              FROM ${silver_database}.${silver_schema}.MTLN_SILVER_CUSTOMERS
+          )
+    Write to Silver:
+      type: "table-output"
+      sources:
+      - "Incremental Load with Watermark"
+      parameters:
+        componentName: "Write to Silver"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "SILVER"
+        targetTable: "MTLN_SILVER_CUSTOMERS"
+        fixDataTypeMismatches: "No"
+        columnMapping:
+        - - "customer_id"
+          - "CUSTOMER_ID"
+        - - "customer_name"
+          - "CUSTOMER_NAME"
+        - - "email"
+          - "EMAIL"
+        - - "phone"
+          - "PHONE"
+        - - "segment"
+          - "SEGMENT"
+        - - "tier"
+          - "TIER"
+        - - "status"
+          - "STATUS"
+        - - "lifetime_value"
+          - "LIFETIME_VALUE"
+        - - "source_system"
+          - "SOURCE_SYSTEM"
+        - - "last_modified_timestamp"
+          - "LAST_MODIFIED_TIMESTAMP"
+        - - "load_timestamp"
+          - "LOAD_TIMESTAMP"
+        outputMode: "Append"
+  variables:
+    bronze_database:
+      metadata:
+        type: "TEXT"
+        description: "Bronze layer database name - override for different environments"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    bronze_schema:
+      metadata:
+        type: "TEXT"
+        description: "Bronze layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "BRONZE"
+    silver_database:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer database name - override for different environments"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "MATILLION_DB"
+    silver_schema:
+      metadata:
+        type: "TEXT"
+        description: "Silver layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "SILVER"
+    watermark_default:
+      metadata:
+        type: "TEXT"
+        description: "Default watermark date for first load - change to force reload\
+          \ from specific date"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "1900-01-01"
+design:
+  components:
+    Incremental Load with Watermark:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: null
+    Write to Silver:
+      position:
+        x: 320
+        "y": 0
+      tempMetlId: null
+  notes:
+    "1":
+      position:
+        x: 0
+        "y": -321
+      size:
+        height: 300
+        width: 650
+      theme: "light-green"
+      content: |
+        ### Incremental Load - Customers (10K rows)
+
+        **Watermark**: Bronze `LOAD_TIMESTAMP` > Silver `MAX(LOAD_TIMESTAMP)`
+
+        - **First Load**: Empty table → loads all 10,000 customer records
+        - **Incremental**: Only new/changed customers since last load
+        - **Quality**: Email standardization, NULL handling, tier defaults
+
+        **Volume**: Medium (10K rows), daily incremental ~100-200 records

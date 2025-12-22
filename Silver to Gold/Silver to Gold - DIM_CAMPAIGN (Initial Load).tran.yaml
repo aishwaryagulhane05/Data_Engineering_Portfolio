@@ -1,0 +1,157 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "DIM_CAMPAIGN - Initial load with SCD Type 2 structure (RUN ONCE)"
+  components:
+    Load Silver Campaigns:
+      type: "table-input"
+      parameters:
+        componentName: "Load Silver Campaigns"
+        database: "[Environment Default]"
+        schema: "SILVER"
+        targetTable: "MTLN_SILVER_CAMPAIGNS"
+        columnNames:
+          - "CAMPAIGN_ID"
+          - "CAMPAIGN_NAME"
+          - "CAMPAIGN_TYPE"
+          - "STATUS"
+          - "OBJECTIVE"
+          - "START_DATE"
+          - "END_DATE"
+          - "BUDGET"
+          - "DURATION_DAYS"
+          - "SOURCE_SYSTEM"
+    Add SCD Type 2 Columns:
+      type: "calculator"
+      sources:
+        - "Load Silver Campaigns"
+      parameters:
+        componentName: "Add SCD Type 2 Columns"
+        includeInputColumns: "Yes"
+        calculations:
+          - - "CURRENT_TIMESTAMP()"
+            - "VALID_FROM"
+          - - "'9999-12-31 23:59:59'::TIMESTAMP_NTZ"
+            - "VALID_TO"
+          - - "TRUE"
+            - "IS_CURRENT"
+          - - "1"
+            - "VERSION_NUMBER"
+          - - "CURRENT_TIMESTAMP()"
+            - "CREATED_TIMESTAMP"
+          - - "CURRENT_TIMESTAMP()"
+            - "UPDATED_TIMESTAMP"
+    Update DIM_CAMPAIGN:
+      type: "table-update"
+      sources:
+        - "Add SCD Type 2 Columns"
+      parameters:
+        componentName: "Update DIM_CAMPAIGN"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "${gold_schema}"
+        targetTable: "DIM_CAMPAIGN"
+        targetAlias: "target"
+        sourceAlias: "source"
+        joinExpression:
+          - - "\"target\".\"CAMPAIGN_ID\" = \"source\".\"CAMPAIGN_ID\" AND \"target\".\"IS_CURRENT\" = TRUE"
+            - "Case"
+        updateMapping:
+          - - "CAMPAIGN_NAME"
+            - "CAMPAIGN_NAME"
+          - - "CAMPAIGN_TYPE"
+            - "CAMPAIGN_TYPE"
+          - - "STATUS"
+            - "STATUS"
+          - - "OBJECTIVE"
+            - "OBJECTIVE"
+          - - "START_DATE"
+            - "START_DATE"
+          - - "END_DATE"
+            - "END_DATE"
+          - - "BUDGET"
+            - "BUDGET"
+          - - "DURATION_DAYS"
+            - "DURATION_DAYS"
+          - - "SOURCE_SYSTEM"
+            - "SOURCE_SYSTEM"
+          - - "UPDATED_TIMESTAMP"
+            - "UPDATED_TIMESTAMP"
+        includeNotMatched: "Yes"
+        insertMapping:
+          - - "CAMPAIGN_ID"
+            - "CAMPAIGN_ID"
+          - - "CAMPAIGN_NAME"
+            - "CAMPAIGN_NAME"
+          - - "CAMPAIGN_TYPE"
+            - "CAMPAIGN_TYPE"
+          - - "STATUS"
+            - "STATUS"
+          - - "OBJECTIVE"
+            - "OBJECTIVE"
+          - - "START_DATE"
+            - "START_DATE"
+          - - "END_DATE"
+            - "END_DATE"
+          - - "BUDGET"
+            - "BUDGET"
+          - - "DURATION_DAYS"
+            - "DURATION_DAYS"
+          - - "SOURCE_SYSTEM"
+            - "SOURCE_SYSTEM"
+          - - "VALID_FROM"
+            - "VALID_FROM"
+          - - "VALID_TO"
+            - "VALID_TO"
+          - - "IS_CURRENT"
+            - "IS_CURRENT"
+          - - "VERSION_NUMBER"
+            - "VERSION_NUMBER"
+          - - "CREATED_TIMESTAMP"
+            - "CREATED_TIMESTAMP"
+          - - "UPDATED_TIMESTAMP"
+            - "UPDATED_TIMESTAMP"
+  variables:
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema name - change to DEV if permissions issue"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+design:
+  components:
+    Load Silver Campaigns:
+      position:
+        x: 0
+        y: 0
+    Add SCD Type 2 Columns:
+      position:
+        x: 160
+        y: 0
+    Update DIM_CAMPAIGN:
+      position:
+        x: 320
+        y: 0
+  notes:
+    "1":
+      position:
+        x: -10
+        y: -350
+      size:
+        height: 330
+        width: 470
+      theme: "yellow"
+      content: |
+        ### DIM_CAMPAIGN - Initial Load
+        
+        **PURPOSE**: Creates table with SCD Type 2 structure
+        **RUN**: Once only (first time setup)
+        
+        **What it does**:
+        - Loads all campaigns from Silver
+        - Adds SCD Type 2 columns
+        - All records get IS_CURRENT = TRUE, VERSION = 1
+        
+        **After success**: Switch to SCD Type 2 pipeline

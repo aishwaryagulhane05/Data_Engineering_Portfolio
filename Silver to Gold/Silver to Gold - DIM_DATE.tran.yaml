@@ -1,0 +1,180 @@
+type: "transformation"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Generates DIM_DATE dimension table (2020-2030) - One-time execution"
+  components:
+    Generate Date Dimension:
+      type: "sql"
+      parameters:
+        componentName: "Generate Date Dimension"
+        query: |
+          -- Generate complete date dimension from 2020 to 2030
+          WITH date_range AS (
+              SELECT 
+                  DATEADD(DAY, SEQ8(), '2020-01-01'::DATE) AS date_value
+              FROM TABLE(GENERATOR(ROWCOUNT => 4018))
+          )
+          SELECT
+              TO_NUMBER(TO_CHAR(date_value, 'YYYYMMDD')) AS date_key,
+              date_value,
+              YEAR(date_value) AS year,
+              QUARTER(date_value) AS quarter,
+              'Q' || QUARTER(date_value) AS quarter_name,
+              MONTH(date_value) AS month,
+              MONTHNAME(date_value) AS month_name,
+              SUBSTR(MONTHNAME(date_value), 1, 3) AS month_short_name,
+              WEEKOFYEAR(date_value) AS week_of_year,
+              DAYOFYEAR(date_value) AS day_of_year,
+              DAY(date_value) AS day_of_month,
+              DAYOFWEEKISO(date_value) AS day_of_week,
+              DAYNAME(date_value) AS day_name,
+              SUBSTR(DAYNAME(date_value), 1, 3) AS day_short_name,
+              CASE 
+                  WHEN DAYOFWEEKISO(date_value) IN (6, 7) THEN TRUE 
+                  ELSE FALSE 
+              END AS is_weekend,
+              FALSE AS is_holiday,
+              NULL AS holiday_name,
+              YEAR(date_value) AS fiscal_year,
+              QUARTER(date_value) AS fiscal_quarter,
+              MONTH(date_value) AS fiscal_month
+          FROM date_range
+          WHERE date_value <= '2030-12-31'::DATE
+          ORDER BY date_key
+    Update DIM_DATE:
+      type: "table-update"
+      sources:
+        - "Generate Date Dimension"
+      parameters:
+        componentName: "Update DIM_DATE"
+        warehouse: "[Environment Default]"
+        database: "[Environment Default]"
+        schema: "${gold_schema}"
+        targetTable: "DIM_DATE"
+        targetAlias: "target"
+        sourceAlias: "source"
+        joinExpression:
+          - - "\"target\".\"DATE_KEY\" = \"source\".\"DATE_KEY\""
+            - "Case"
+        updateMapping:
+          - - "DATE_KEY"
+            - "DATE_KEY"
+          - - "DATE_VALUE"
+            - "DATE_VALUE"
+          - - "YEAR"
+            - "YEAR"
+          - - "QUARTER"
+            - "QUARTER"
+          - - "QUARTER_NAME"
+            - "QUARTER_NAME"
+          - - "MONTH"
+            - "MONTH"
+          - - "MONTH_NAME"
+            - "MONTH_NAME"
+          - - "MONTH_SHORT_NAME"
+            - "MONTH_SHORT_NAME"
+          - - "WEEK_OF_YEAR"
+            - "WEEK_OF_YEAR"
+          - - "DAY_OF_YEAR"
+            - "DAY_OF_YEAR"
+          - - "DAY_OF_MONTH"
+            - "DAY_OF_MONTH"
+          - - "DAY_OF_WEEK"
+            - "DAY_OF_WEEK"
+          - - "DAY_NAME"
+            - "DAY_NAME"
+          - - "DAY_SHORT_NAME"
+            - "DAY_SHORT_NAME"
+          - - "IS_WEEKEND"
+            - "IS_WEEKEND"
+          - - "IS_HOLIDAY"
+            - "IS_HOLIDAY"
+          - - "HOLIDAY_NAME"
+            - "HOLIDAY_NAME"
+          - - "FISCAL_YEAR"
+            - "FISCAL_YEAR"
+          - - "FISCAL_QUARTER"
+            - "FISCAL_QUARTER"
+          - - "FISCAL_MONTH"
+            - "FISCAL_MONTH"
+        includeNotMatched: "Yes"
+        insertMapping:
+          - - "DATE_KEY"
+            - "DATE_KEY"
+          - - "DATE_VALUE"
+            - "DATE_VALUE"
+          - - "YEAR"
+            - "YEAR"
+          - - "QUARTER"
+            - "QUARTER"
+          - - "QUARTER_NAME"
+            - "QUARTER_NAME"
+          - - "MONTH"
+            - "MONTH"
+          - - "MONTH_NAME"
+            - "MONTH_NAME"
+          - - "MONTH_SHORT_NAME"
+            - "MONTH_SHORT_NAME"
+          - - "WEEK_OF_YEAR"
+            - "WEEK_OF_YEAR"
+          - - "DAY_OF_YEAR"
+            - "DAY_OF_YEAR"
+          - - "DAY_OF_MONTH"
+            - "DAY_OF_MONTH"
+          - - "DAY_OF_WEEK"
+            - "DAY_OF_WEEK"
+          - - "DAY_NAME"
+            - "DAY_NAME"
+          - - "DAY_SHORT_NAME"
+            - "DAY_SHORT_NAME"
+          - - "IS_WEEKEND"
+            - "IS_WEEKEND"
+          - - "IS_HOLIDAY"
+            - "IS_HOLIDAY"
+          - - "HOLIDAY_NAME"
+            - "HOLIDAY_NAME"
+          - - "FISCAL_YEAR"
+            - "FISCAL_YEAR"
+          - - "FISCAL_QUARTER"
+            - "FISCAL_QUARTER"
+          - - "FISCAL_MONTH"
+            - "FISCAL_MONTH"
+  variables:
+    gold_schema:
+      metadata:
+        type: "TEXT"
+        description: "Gold layer schema name"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "GOLD"
+design:
+  components:
+    Generate Date Dimension:
+      position:
+        x: 0
+        y: 0
+    Update DIM_DATE:
+      position:
+        x: 160
+        y: 0
+  notes:
+    "1":
+      position:
+        x: -10
+        y: -367
+      size:
+        height: 345
+        width: 400
+      theme: "light-green"
+      content: |
+        ### DIM_DATE Generation (2020-2030)
+        
+        **Purpose**: One-time creation of date dimension
+        
+        - **Range**: 2020-01-01 to 2030-12-31 (4,018 days)
+        - **Attributes**: Year, quarter, month, week, day
+        - **Flags**: IS_WEEKEND for business filtering
+        - **Load Type**: Full refresh (run once)
+        
+        **Usage**: Reference table for all fact tables
