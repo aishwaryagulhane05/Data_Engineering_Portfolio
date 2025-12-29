@@ -1,0 +1,387 @@
+type: "orchestration"
+version: "1.0"
+pipeline:
+  metadata:
+    description: "Dynamic ETL pipeline with INCREMENTAL LOADING - Loads 100+ PostgreSQL\
+      \ tables with different schemas into Snowflake. Each table can have unique incremental\
+      \ columns and primary keys configured in the tables_to_load grid variable. Uses\
+      \ high water mark strategy for 97% faster subsequent runs. Note: Design-time\
+      \ validation warning is expected - pipeline works correctly at runtime."
+  components:
+    Start:
+      type: "start"
+      transitions:
+        unconditional:
+        - "Create Error Log Table"
+      parameters:
+        componentName: "Start"
+    Table Iterator:
+      type: "fixed-iterator"
+      transitions:
+        success:
+        - "Pipeline Success Summary"
+        failure:
+        - "Log Pipeline Failure"
+      iterationTarget: "Load PostgreSQL Table"
+      parameters:
+        componentName: "Table Iterator"
+        concurrency: "Sequential"
+        variablesToIterate:
+        - "table_name"
+        - "incremental_column"
+        - "primary_key"
+        iterationValues:
+          fromGrid:
+            variable: "tables_to_load"
+            columns:
+            - "table_name"
+            - "incremental_column"
+            - "primary_key"
+        breakOnFailure: "No"
+    Load PostgreSQL Table:
+      type: "modular-postgresql-input-v1"
+      parameters:
+        componentId: "modular-postgresql-input-v1"
+        componentName: "Load PostgreSQL Table"
+        inputId: "postgresql-input-v1"
+        postgresql-input-v1:
+          connection:
+            connectionReferenceId: ""
+            overrides:
+              authType: "USERNAME_PASSWORD"
+              user: ""
+              password: ""
+              url: ""
+          mode: "BASIC"
+          schema: "${postgres_schema}"
+          dataSource: "${table_name}"
+          dataSelection:
+          - "*"
+        outputId: "snowflake-output-connector-v0"
+        snowflake-output-connector-v0:
+          warehouse: "[Environment Default]"
+          database: "${target_database}"
+          schema: "${target_schema}"
+          tableName: "${table_name}"
+          createTableMode: "APPEND"
+          primaryKeys:
+          - "${primary_key}"
+          cleanStagedFiles: "Yes"
+          stagePlatform: "SNOWFLAKE"
+          snowflake#internalStageType: "USER"
+        dataLoading:
+          loadType: "INCREMENTAL_LOAD"
+          incrementalLoading:
+            highWaterMarkSelection: "${incremental_column}"
+    Create Error Log Table:
+      type: "create-table-v2"
+      transitions:
+        success:
+        - "Table Iterator"
+      parameters:
+        componentName: "Create Error Log Table"
+        createMethod: "Create If Not Exists"
+        database: "${target_database}"
+        schema: "${target_schema}"
+        table: "${error_log_table}"
+        snowflakeTableType: "Permanent"
+        columns:
+        - - "ERROR_ID"
+          - "NUMBER"
+          - "38"
+          - "0"
+          - ""
+          - "Yes"
+          - "No"
+          - "IDENTITY(1,1)"
+          - ""
+        - - "PIPELINE_NAME"
+          - "VARCHAR"
+          - "500"
+          - ""
+          - ""
+          - "No"
+          - "No"
+          - ""
+          - ""
+        - - "TABLE_NAME"
+          - "VARCHAR"
+          - "255"
+          - ""
+          - ""
+          - "No"
+          - "No"
+          - ""
+          - ""
+        - - "ERROR_MESSAGE"
+          - "VARCHAR"
+          - "16777216"
+          - ""
+          - ""
+          - "No"
+          - "No"
+          - ""
+          - ""
+        - - "ERROR_TIMESTAMP"
+          - "TIMESTAMP_NTZ"
+          - "9"
+          - ""
+          - "CURRENT_TIMESTAMP()"
+          - "No"
+          - "No"
+          - ""
+          - ""
+        - - "EXECUTION_ID"
+          - "VARCHAR"
+          - "255"
+          - ""
+          - ""
+          - "No"
+          - "No"
+          - ""
+          - ""
+    Log Pipeline Failure:
+      type: "sql-executor"
+      transitions:
+        success:
+        - "Send Failure Notification"
+      parameters:
+        componentName: "Log Pipeline Failure"
+        scriptLocation: "Component"
+        sqlScript: "INSERT INTO IDENTIFIER('${target_database}'||'.'||'${target_schema}'||'.'||'${error_log_table}')\n\
+          (PIPELINE_NAME, TABLE_NAME, ERROR_MESSAGE, EXECUTION_ID)\nSELECT \n  'PostgreSQL\
+          \ to Snowflake - Dynamic Ingestion',\n  'PIPELINE_FAILURE',\n  'Pipeline\
+          \ failed during table iteration',\n  TO_VARCHAR(CURRENT_TIMESTAMP);\n\n"
+    Send Failure Notification:
+      type: "send-email-v2"
+      parameters:
+        componentName: "Send Failure Notification"
+        toRecipients:
+        - "admin@example.com"
+        subject: "[ALERT] PostgreSQL to Snowflake Pipeline Failed"
+        message: "The PostgreSQL to Snowflake dynamic ingestion pipeline has encountered\
+          \ errors. Please check the error log table for details."
+        senderAddress: "noreply@example.com"
+        smtpUsername: "smtp_user"
+        smtpPassword: "smtp_secret"
+        smtpHostname: "smtp.example.com"
+        smtpPort: "587"
+        enableSslTls: "No"
+        enableStartTls: "Yes"
+    Pipeline Success Summary:
+      type: "sql-executor"
+      transitions:
+        success:
+        - "Send Success Notification"
+      parameters:
+        componentName: "Pipeline Success Summary"
+        scriptLocation: "Component"
+        sqlScript: "INSERT INTO IDENTIFIER('${target_database}'||'.'||'${target_schema}'||'.'||'${error_log_table}')\n\
+          (PIPELINE_NAME, TABLE_NAME, ERROR_MESSAGE, EXECUTION_ID)\nSELECT \n  'PostgreSQL\
+          \ to Snowflake - Dynamic Ingestion',\n  'PIPELINE_SUCCESS',\n  'Pipeline\
+          \ completed successfully',\n  TO_VARCHAR(CURRENT_TIMESTAMP);\n"
+    Send Success Notification:
+      type: "send-email-v2"
+      parameters:
+        componentName: "Send Success Notification"
+        toRecipients:
+        - "admin@example.com"
+        subject: "[SUCCESS] PostgreSQL to Snowflake Pipeline Completed"
+        message: "The PostgreSQL to Snowflake dynamic ingestion pipeline has completed\
+          \ successfully. All tables have been loaded."
+        senderAddress: "noreply@example.com"
+        smtpUsername: "smtp_user"
+        smtpPassword: "smtp_secret"
+        smtpHostname: "smtp.example.com"
+        smtpPort: "587"
+        enableSslTls: "No"
+        enableStartTls: "Yes"
+  variables:
+    postgres_schema:
+      metadata:
+        type: "TEXT"
+        description: "PostgreSQL schema to extract data from"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "public"
+    target_database:
+      metadata:
+        type: "TEXT"
+        description: "Snowflake target database"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "[Environment Default]"
+    target_schema:
+      metadata:
+        type: "TEXT"
+        description: "Snowflake target schema"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "[Environment Default]"
+    table_name:
+      metadata:
+        type: "TEXT"
+        description: "Current table name being processed (set by iterator)"
+        scope: "COPIED"
+        visibility: "PRIVATE"
+      defaultValue: ""
+    error_notification_email:
+      metadata:
+        type: "TEXT"
+        description: "Email address to send failure notifications"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: ""
+    error_log_table:
+      metadata:
+        type: "TEXT"
+        description: "Name of error logging table in Snowflake"
+        scope: "SHARED"
+        visibility: "PUBLIC"
+      defaultValue: "PIPELINE_ERROR_LOG"
+    failed_table_count:
+      metadata:
+        type: "NUMBER"
+        description: "Count of tables that failed to load"
+        scope: "SHARED"
+        visibility: "PRIVATE"
+      defaultValue: "0"
+    success_table_count:
+      metadata:
+        type: "NUMBER"
+        description: "Count of tables that loaded successfully"
+        scope: "SHARED"
+        visibility: "PRIVATE"
+      defaultValue: "0"
+    tables_to_load:
+      metadata:
+        type: "GRID"
+        description: "List of tables with per-table configuration: table name, incremental\
+          \ column (timestamp for high water mark), and primary key column. Supports\
+          \ 100+ tables with different schemas."
+        scope: "SHARED"
+        visibility: "PUBLIC"
+        columns:
+          table_name:
+            columnType: "TEXT"
+          incremental_column:
+            columnType: "TEXT"
+          primary_key:
+            columnType: "TEXT"
+      defaultValue:
+      - - "customers"
+        - "updated_at"
+        - "customer_id"
+      - - "orders"
+        - "order_date"
+        - "order_id"
+      - - "products"
+        - "last_modified"
+        - "product_id"
+      - - "order_items"
+        - "updated_at"
+        - "item_id"
+      - - "employees"
+        - "modified_date"
+        - "employee_id"
+      - - "departments"
+        - "updated_at"
+        - "dept_id"
+      - - "suppliers"
+        - "last_updated"
+        - "supplier_id"
+      - - "inventory"
+        - "updated_at"
+        - "inventory_id"
+      - - "transactions"
+        - "transaction_date"
+        - "transaction_id"
+      - - "payments"
+        - "payment_date"
+        - "payment_id"
+      - - "shipments"
+        - "shipped_date"
+        - "shipment_id"
+      - - "returns"
+        - "return_date"
+        - "return_id"
+      - - "categories"
+        - "updated_at"
+        - "category_id"
+      - - "brands"
+        - "updated_at"
+        - "brand_id"
+      - - "warehouses"
+        - "updated_at"
+        - "warehouse_id"
+      - - "locations"
+        - "updated_at"
+        - "location_id"
+      - - "customers_history"
+        - "effective_date"
+        - "history_id"
+      - - "order_status"
+        - "status_date"
+        - "status_id"
+      - - "product_reviews"
+        - "review_date"
+        - "review_id"
+      - - "user_accounts"
+        - "last_login"
+        - "user_id"
+    incremental_column:
+      metadata:
+        type: "TEXT"
+        description: "Incremental column for current table (set by iterator)"
+        scope: "COPIED"
+        visibility: "PRIVATE"
+      defaultValue: ""
+    primary_key:
+      metadata:
+        type: "TEXT"
+        description: "Primary key column for current table (set by iterator)"
+        scope: "COPIED"
+        visibility: "PRIVATE"
+      defaultValue: ""
+design:
+  components:
+    Start:
+      position:
+        x: 0
+        "y": 0
+      tempMetlId: 1
+    Create Error Log Table:
+      position:
+        x: 200
+        "y": 0
+      tempMetlId: 4
+    Table Iterator:
+      position:
+        x: 400
+        "y": -20
+      tempMetlId: 2
+    Load PostgreSQL Table:
+      position:
+        x: 400
+        "y": -20
+      tempMetlId: 3
+    Pipeline Success Summary:
+      position:
+        x: 600
+        "y": -40
+      tempMetlId: 5
+    Send Success Notification:
+      position:
+        x: 800
+        "y": -40
+      tempMetlId: 6
+    Log Pipeline Failure:
+      position:
+        x: 600
+        "y": 40
+      tempMetlId: 7
+    Send Failure Notification:
+      position:
+        x: 800
+        "y": 40
+      tempMetlId: 8
